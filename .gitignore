@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs and Spark
+*.log
+logs/
+checkpoints/
+spark-warehouse/
+target/
+
+# Local datasets: do not push large files
+data/raw/*
+!data/raw/.gitkeep
+
+data/interim/*
+!data/interim/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+data/reference/*
+!data/reference/.gitkeep
