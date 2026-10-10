@@ -1,0 +1,5 @@
+unit_diagnosis,sensors,records
+hpa_scale_candidate,51,949272
+mixed_scale_candidates,17,362192
+pa_scale_candidate,5026,84764303
+unresolved_scale,62,1223032
