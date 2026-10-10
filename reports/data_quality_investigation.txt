@@ -1,0 +1,16 @@
+BME280 DATA QUALITY INVESTIGATION
+=================================
+
+rows: 87,298,799
+timestamps_with_quotes: 18,038
+timestamps_invalid_before_cleanup: 18,038
+timestamps_invalid_after_cleanup: 0
+timestamps_repaired: 18,038
+timestamps_outside_march: 48
+pressure_hpa_like: 930,133
+pressure_pa_like: 84,617,771
+pressure_outside_both_ranges: 1,629,550
+temperature_below_range: 4,159,501
+temperature_above_range: 6,290
+humidity_below_range: 4,488
+humidity_above_range: 253
