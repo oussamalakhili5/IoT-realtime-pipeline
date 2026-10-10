@@ -1,0 +1,13 @@
+sensor_id,quality_status,records
+39287,converted_from_hpa,10
+54381,converted_from_hpa,7
+54381,converted_from_hpa_out_of_range,3
+54381,invalid_nonpositive,10
+54381,outside_candidate_ranges,10
+54381,valid_pa,10
+78677,converted_from_hpa,10
+78677,invalid_nonpositive,10
+78677,outside_candidate_ranges,10
+78677,valid_pa,10
+93517,converted_from_hpa,10
+93517,invalid_nonpositive,10
