@@ -1,0 +1,21 @@
+csv_row,issue,sensor_id,timestamp,column,value
+2,invalid_timestamp,79419,'2026-02-20 08:29:01',timestamp,'2026-02-20 08:29:01'
+3,invalid_timestamp,30343,'2026-03-01 00:58:24',timestamp,'2026-03-01 00:58:24'
+4,invalid_timestamp,30343,'2026-03-01 01:00:51',timestamp,'2026-03-01 01:00:51'
+5,invalid_timestamp,30343,'2026-03-01 01:03:19',timestamp,'2026-03-01 01:03:19'
+6,invalid_timestamp,30343,'2026-03-01 01:05:46',timestamp,'2026-03-01 01:05:46'
+580,temperature_outside_screening_range,3440,2026-03-01T00:00:00,temperature,-145.82
+652,temperature_outside_screening_range,8451,2026-03-01T00:00:05,temperature,-142.97
+653,temperature_outside_screening_range,87419,2026-03-01T00:00:05,temperature,-143.51
+722,temperature_outside_screening_range,12763,2026-03-01T00:00:06,temperature,-146.10
+723,temperature_outside_screening_range,53713,2026-03-01T00:00:06,temperature,-146.87
+5087,humidity_outside_screening_range,70971,2026-03-01T00:02:22,humidity,-1.00
+9163,humidity_outside_screening_range,79000,2026-03-01T00:04:29,humidity,-1
+9667,humidity_outside_screening_range,70971,2026-03-01T00:04:48,humidity,-1.00
+14237,humidity_outside_screening_range,70971,2026-03-01T00:07:13,humidity,-1.00
+18893,humidity_outside_screening_range,70971,2026-03-01T00:09:39,humidity,-1.00
+2,pressure_outside_screening_range,79419,'2026-02-20 08:29:01',pressure,999.34
+576,pressure_outside_screening_range,22775,2026-03-01T00:00:00,pressure,1022.0
+578,pressure_outside_screening_range,72226,2026-03-01T00:00:00,pressure,1023.35998535156
+580,pressure_outside_screening_range,3440,2026-03-01T00:00:00,pressure,14643.25
+593,pressure_outside_screening_range,93517,2026-03-01T00:00:00,pressure,997.9

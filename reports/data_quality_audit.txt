@@ -1,0 +1,34 @@
+BME280 DATA QUALITY AUDIT
+=========================
+
+Dataset: data\raw\2026-03_bme280\2026-03_bme280.csv
+Total records: 87,298,799
+
+MISSING VALUES
+sensor_id: 0 (0.0000%)
+sensor_type: 0 (0.0000%)
+location: 0 (0.0000%)
+lat: 0 (0.0000%)
+lon: 0 (0.0000%)
+timestamp: 0 (0.0000%)
+pressure: 115,177 (0.1319%)
+altitude: 87,298,799 (100.0000%)
+pressure_sealevel: 87,298,799 (100.0000%)
+temperature: 125,989 (0.1443%)
+humidity: 1,111,456 (1.2732%)
+
+Invalid timestamps: 18,038
+
+NON-NUMERIC VALUES
+temperature: 45,749
+humidity: 36,776
+pressure: 6,168
+lat: 0
+lon: 0
+
+VALUES OUTSIDE SCREENING RANGES
+temperature [-40.0, 85.0]: 4,165,791
+humidity [0.0, 100.0]: 4,741
+pressure [30000.0, 110000.0]: 2,559,683
+lat [-90.0, 90.0]: 0
+lon [-180.0, 180.0]: 0
