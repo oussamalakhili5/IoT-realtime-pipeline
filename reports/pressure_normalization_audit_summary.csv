@@ -1,0 +1,7 @@
+quality_status,records,percentage
+missing_or_nonnumeric,121345,0.13899962128917717
+invalid_nonpositive,505912,0.5795177090580593
+converted_from_hpa,930023,1.065333098110548
+converted_from_hpa_out_of_range,110,0.00012600402440817083
+valid_pa,84617771,96.92890620408191
+outside_candidate_ranges,1123638,1.2871173634358932
