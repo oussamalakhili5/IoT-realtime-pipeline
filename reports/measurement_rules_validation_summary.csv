@@ -1,0 +1,9 @@
+record_status,pressure_status,records
+accepted_candidate,converted_from_hpa,20
+accepted_with_humidity_boundary,converted_from_hpa,10
+accepted_with_humidity_boundary,valid_pa,10
+review_required,converted_from_hpa,7
+review_required,converted_from_hpa_out_of_range,3
+review_required,invalid_nonpositive,30
+review_required,outside_candidate_ranges,20
+review_required,valid_pa,10
