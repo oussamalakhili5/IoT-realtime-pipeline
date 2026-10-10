@@ -1,0 +1,25 @@
+Total rows: 87298799
+Distinct sensors: 5156
+Invalid timestamps: 18038
+Earliest timestamp: 2026-03-01 00:00:00
+Latest timestamp: 2026-03-31 23:59:59
+
+Missing values:
+sensor_id: 0
+sensor_type: 0
+location: 0
+lat: 0
+lon: 0
+timestamp: 0
+pressure: 115177
+altitude: 87298799
+pressure_sealevel: 87298799
+temperature: 125989
+humidity: 1111456
+
+Numerical statistics:
+temperature: min=-176.32, max=193.64
+humidity: min=-1.0, max=655.35
+pressure: min=-29211.66, max=10110030.0
+lat: min=-41.3216941, max=68.386
+lon: min=-149.532, max=174.7655601
