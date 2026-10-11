@@ -33,7 +33,7 @@ CHECKPOINT_DIR = (
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_transformations_v1"
+    / "spark_iot_kafka_march_routing_v1"
 )
 
 
@@ -72,6 +72,24 @@ EVENT_SCHEMA = StructType(
     ]
 )
 
+def route_batch(batch_df, batch_id):
+    """Route each micro-batch into accepted and review-required events."""
+
+    accepted_events = batch_df.filter(
+        col("processing_status") == "accepted"
+    )
+
+    review_events = batch_df.filter(
+        col("processing_status") != "accepted"
+    )
+
+    logging.info("Routing micro-batch %s", batch_id)
+
+    print(f"\n=== BATCH {batch_id}: ACCEPTED EVENTS ===")
+    accepted_events.show(n=10, truncate=False)
+
+    print(f"\n=== BATCH {batch_id}: EVENTS REQUIRING REVIEW ===")
+    review_events.show(n=10, truncate=False)
 
 def main():
     """Start the Kafka source and process events with Spark."""
@@ -207,14 +225,14 @@ def main():
 
         query = (
             events.writeStream
-            .format("console")
-            .outputMode("append")
-            .option("truncate", "false")
-            .option("numRows", "10")
-            .option("checkpointLocation", CHECKPOINT_DIR.as_posix())
+            .foreachBatch(route_batch)
+            .option(
+                "checkpointLocation",
+                CHECKPOINT_DIR.as_posix(),
+            )
             .trigger(processingTime="5 seconds")
             .start()
-        )
+       )
 
         logging.info("Streaming query started. Press Ctrl+C to stop.")
 
