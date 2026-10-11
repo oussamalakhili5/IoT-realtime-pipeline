@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 def _is_missing(value: Any) -> bool:
@@ -65,12 +65,12 @@ def _optional_number(value: Any) -> float | None:
 
 
 def _optional_text(value: Any) -> str | None:
-    """Convert an optional scalar value to text."""
+    """Convert an optional scalar value to non-empty text or None."""
     if _is_missing(value):
         return None
 
-    return str(value).strip()
-
+    text_value = str(value).strip()
+    return text_value or None
 
 def _required_status(row: Mapping[str, Any], field: str) -> str:
     """Return a non-empty quality status."""
@@ -117,12 +117,16 @@ def _to_bool(value: Any) -> bool:
     return bool(value)
 
 
+
 def validate_event(event: Mapping[str, Any]) -> None:
     """Validate the structure and value types of a canonical event."""
+
+    # Validate the top-level event structure.
     required_top_level = {
         "schema_version",
         "sensor_id",
         "timestamp",
+        "location",
         "measurements",
         "quality",
     }
@@ -134,100 +138,164 @@ def validate_event(event: Mapping[str, Any]) -> None:
             f"Missing event fields: {sorted(missing_fields)}"
         )
 
+    # Validate required textual fields.
     for field in ("schema_version", "sensor_id", "timestamp"):
         if not isinstance(event[field], str) or not event[field].strip():
             raise ValueError(
                 f"Event field '{field}' must be non-empty text."
             )
 
-    measurements = event["measurements"]
-    quality = event["quality"]
+        # Extract nested objects and validate their types.
+        location = event["location"]
+        measurements = event["measurements"]
+        quality = event["quality"]
 
-    if not isinstance(measurements, Mapping):
-        raise ValueError("'measurements' must be an object.")
+        if not isinstance(location, Mapping):
+            raise ValueError("'location' must be an object.")
 
-    if not isinstance(quality, Mapping):
-        raise ValueError("'quality' must be an object.")
+        if not isinstance(measurements, Mapping):
+            raise ValueError("'measurements' must be an object.")
 
-    required_measurements = {
-        "pressure_raw",
-        "pressure_numeric",
-        "pressure_pa_candidate",
-        "pressure_unit_candidate",
-        "temperature_c",
-        "humidity_pct",
-    }
+        if not isinstance(quality, Mapping):
+            raise ValueError("'quality' must be an object.")
 
-    required_quality = {
-        "pressure_status",
-        "temperature_status",
-        "humidity_status",
-        "humidity_at_boundary",
-        "record_status",
-    }
+        # Validate required location fields.
+        required_location = {
+            "location_id",
+            "latitude",
+            "longitude",
+        }
 
-    missing_measurements = required_measurements - set(measurements)
-    missing_quality = required_quality - set(quality)
+        missing_location = required_location - set(location)
 
-    if missing_measurements:
-        raise ValueError(
-            f"Missing measurement fields: {sorted(missing_measurements)}"
-        )
-
-    if missing_quality:
-        raise ValueError(
-            f"Missing quality fields: {sorted(missing_quality)}"
-        )
-
-    for field in (
-        "pressure_raw",
-        "pressure_unit_candidate",
-    ):
-        value = measurements[field]
-
-        if value is not None and not isinstance(value, str):
+        if missing_location:
             raise ValueError(
-                f"Measurement field '{field}' must be text or None."
+                f"Missing location fields: {sorted(missing_location)}"
             )
 
-    numeric_fields = (
-        "pressure_numeric",
-        "pressure_pa_candidate",
-        "temperature_c",
-        "humidity_pct",
-    )
+        # Validate the optional location identifier.
+        location_id = location["location_id"]
 
-    for field in numeric_fields:
-        value = measurements[field]
-
-        if value is not None:
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-            ):
+        if location_id is not None:
+            if not isinstance(location_id, str) or not location_id.strip():
                 raise ValueError(
-                    f"Measurement field '{field}' must be a finite "
-                    "number or None."
+                    "'location_id' must be non-empty text or None."
                 )
 
-    for field in (
-        "pressure_status",
-        "temperature_status",
-        "humidity_status",
-        "record_status",
-    ):
-        value = quality[field]
+            # Validate geographic coordinate types and ranges.
+            coordinate_ranges = {
+                "latitude": (-90.0, 90.0),
+                "longitude": (-180.0, 180.0),
+            }
 
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(
-                f"Quality field '{field}' must be non-empty text."
-            )
+            for field, (minimum, maximum) in coordinate_ranges.items():
+                value = location[field]
 
-    if not isinstance(quality["humidity_at_boundary"], bool):
-        raise ValueError(
-            "'humidity_at_boundary' must be a boolean."
-        )
+                if value is None:
+                    continue
+
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                ):
+                    raise ValueError(
+                        f"Location field '{field}' must be a finite "
+                        "number or None."
+                    )
+
+                if not minimum <= value <= maximum:
+                    raise ValueError(
+                        f"Location field '{field}' must be between "
+                        f"{minimum} and {maximum}."
+                    )
+
+                # Validate required measurement fields.
+                required_measurements = {
+                    "pressure_raw",
+                    "pressure_numeric",
+                    "pressure_pa_candidate",
+                    "pressure_unit_candidate",
+                    "temperature_c",
+                    "humidity_pct",
+                }
+
+                missing_measurements = required_measurements - set(measurements)
+
+                if missing_measurements:
+                    raise ValueError(
+                        f"Missing measurement fields: "
+                        f"{sorted(missing_measurements)}"
+                    )
+
+                # Validate required quality fields.
+                required_quality = {
+                    "pressure_status",
+                    "temperature_status",
+                    "humidity_status",
+                    "humidity_at_boundary",
+                    "record_status",
+                }
+
+                missing_quality = required_quality - set(quality)
+
+                if missing_quality:
+                    raise ValueError(
+                        f"Missing quality fields: {sorted(missing_quality)}"
+                    )
+
+                # Validate optional textual measurement fields.
+                for field in ("pressure_raw", "pressure_unit_candidate"):
+                    value = measurements[field]
+
+                    if value is not None and not isinstance(value, str):
+                        raise ValueError(
+                            f"Measurement field '{field}' must be text or None."
+                        )
+
+                    # Validate numeric measurement fields.
+                    numeric_fields = (
+                        "pressure_numeric",
+                        "pressure_pa_candidate",
+                        "temperature_c",
+                        "humidity_pct",
+                    )
+
+                    for field in numeric_fields:
+                        value = measurements[field]
+
+                        if value is not None:
+                            if (
+                                isinstance(value, bool)
+                                or not isinstance(value, (int, float))
+                                or not math.isfinite(value)
+                            ):
+                                raise ValueError(
+                                    f"Measurement field '{field}' must be a finite "
+                                    "number or None."
+                                )
+
+                            # Validate quality status fields.
+                            status_fields = (
+                                "pressure_status",
+                                "temperature_status",
+                                "humidity_status",
+                                "record_status",
+                            )
+
+                            for field in status_fields:
+                                value = quality[field]
+
+                                if not isinstance(value, str) or not value.strip():
+                                    raise ValueError(
+                                        f"Quality field '{field}' must be non-empty text."
+                                    )
+
+                                # Validate the humidity boundary flag.
+                                if not isinstance(quality["humidity_at_boundary"], bool):
+                                    raise ValueError(
+                                        "'humidity_at_boundary' must be a boolean."
+                                    )
 
 
 def build_event(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -246,6 +314,11 @@ def build_event(row: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "sensor_id": _required_text(row, "sensor_id"),
         "timestamp": _required_text(row, "timestamp"),
+        "location": {
+            "location_id": _optional_text(row.get("location")),
+            "latitude": _optional_number(row.get("lat")),
+            "longitude": _optional_number(row.get("lon")),
+        },
         "measurements": {
             "pressure_raw": _optional_text(row.get("pressure_raw")),
             "pressure_numeric": _optional_number(
@@ -277,6 +350,7 @@ def build_event(row: Mapping[str, Any]) -> dict[str, Any]:
                 row, "record_status"
             ),
         },
+
     }
 
     validate_event(event)

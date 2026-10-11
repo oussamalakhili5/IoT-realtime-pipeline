@@ -34,6 +34,9 @@ REPORTING_PERIOD_END = pd.Timestamp("2026-04-01")
 
 REQUIRED_COLUMNS = {
     "sensor_id",
+    "location",
+    "lat",
+    "lon",
     "timestamp",
     "pressure",
     "temperature",
@@ -125,6 +128,9 @@ def build_event_from_source_row(row):
     event_input = {
         "sensor_id": sensor_id,
         "timestamp": timestamp,
+        "location": clean_text(row.get("location")),
+        "lat": to_optional_float(row.get("lat")),
+        "lon": to_optional_float(row.get("lon")),
         "pressure_raw": pressure_raw,
         "pressure_numeric": to_optional_float(pressure_raw),
         **quality,
@@ -215,6 +221,9 @@ def main():
         column_mapping[name]
         for name in (
             "sensor_id",
+            "location",
+            "lat",
+            "lon",
             "timestamp",
             "pressure",
             "temperature",

@@ -27,6 +27,9 @@ def make_sample_row(**overrides):
         "humidity_status": "valid_humidity",
         "humidity_at_boundary": False,
         "record_status": "accepted_candidate",
+        "location": "17145",
+        "lat": 49.902,
+        "lon": 8.680,
     }
 
     row.update(overrides)
@@ -35,6 +38,12 @@ def make_sample_row(**overrides):
 
 class TestEventSchema(unittest.TestCase):
     """Test canonical IoT event construction and validation."""
+    def test_rejects_out_of_range_coordinates(self):
+        with self.assertRaises(ValueError):
+            build_event(make_sample_row(lat=91.0))
+
+            with self.assertRaises(ValueError):
+                build_event(make_sample_row(lon=181.0))
 
     def test_builds_expected_event_structure(self):
         event = build_event(make_sample_row())
@@ -49,6 +58,14 @@ class TestEventSchema(unittest.TestCase):
         self.assertEqual(
             event["quality"]["pressure_status"],
             "converted_from_hpa",
+        )
+        self.assertEqual(
+                event["location"],
+                {
+                    "location_id": "17145",
+                    "latitude": 49.902,
+                    "longitude": 8.680,
+                },
         )
 
     def test_preserves_missing_numeric_values_as_none(self):
@@ -87,6 +104,38 @@ class TestEventSchema(unittest.TestCase):
     def test_rejects_missing_event_fields(self):
         with self.assertRaises(ValueError):
             validate_event({"schema_version": "1.0"})
+
+    def test_preserves_missing_location_values_as_none(self):
+        event = build_event(
+            make_sample_row(
+                location=None,
+                lat=None,
+                lon=None,
+            )
+        )
+
+        self.assertEqual(
+            event["location"],
+            {
+                "location_id": None,
+                "latitude": None,
+                "longitude": None,
+            },
+        )
+
+def test_rejects_out_of_range_coordinates(self):
+    with self.assertRaises(ValueError):
+        build_event(make_sample_row(lat=91.0))
+
+        with self.assertRaises(ValueError):
+            build_event(make_sample_row(lon=181.0))
+
+def test_rejects_out_of_range_coordinates(self):
+    with self.assertRaises(ValueError):
+        build_event(make_sample_row(lat=91.0))
+
+        with self.assertRaises(ValueError):
+            build_event(make_sample_row(lon=181.0))
 
 
 if __name__ == "__main__":

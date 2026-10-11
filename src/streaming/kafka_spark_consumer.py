@@ -26,14 +26,13 @@ from pyspark.sql.types import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
-KAFKA_TOPIC = "iot-sensor-events-march-validated"
-
+KAFKA_TOPIC = "iot-sensor-events-march-geospatial-test"
 CHECKPOINT_DIR = (
     PROJECT_ROOT
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_routing_v1"
+    / "spark_iot_kafka_march_geospatial_v1"
 )
 
 
@@ -42,6 +41,17 @@ EVENT_SCHEMA = StructType(
         StructField("schema_version", StringType(), True),
         StructField("sensor_id", StringType(), True),
         StructField("timestamp", StringType(), True),
+        StructField(
+            "location",
+            StructType(
+                [
+                    StructField("location_id", StringType(), True),
+                    StructField("latitude", DoubleType(), True),
+                    StructField("longitude", DoubleType(), True),
+                ]
+            ),
+            True,
+        ),
         StructField(
             "measurements",
             StructType(
@@ -141,7 +151,7 @@ def main():
         )
 
         events = (
-    parsed_stream.select(
+         parsed_stream.select(
         col("topic"),
         col("partition"),
         col("offset"),
@@ -174,7 +184,11 @@ def main():
         col("event.quality.record_status").alias(
             "record_status"
         ),
+        col("event.location.location_id").alias("location_id"),
+        col("event.location.latitude").alias("latitude"),
+        col("event.location.longitude").alias("longitude"),
     )
+
     .withColumn(
         "event_timestamp",
         to_timestamp(col("event_timestamp_raw")),
@@ -191,7 +205,7 @@ def main():
         )
         .when(
             col("schema_version").isNull()
-            | (col("schema_version") != lit("1.0")),
+            | (~col("schema_version").isin("1.0", "1.1")),
             lit("unsupported_schema"),
         )
         .when(
@@ -215,6 +229,7 @@ def main():
             lit("accepted"),
         )
         .otherwise(lit("unknown_quality_status")),
+
     )
 )
 
