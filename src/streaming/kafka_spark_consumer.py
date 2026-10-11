@@ -5,7 +5,15 @@ import logging
 from pathlib import Path
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json
+from pyspark.sql.functions import (
+    col,
+    from_json,
+    length,
+    lit,
+    to_timestamp,
+    trim,
+    when,
+)
 from pyspark.sql.types import (
     BooleanType,
     DoubleType,
@@ -25,7 +33,7 @@ CHECKPOINT_DIR = (
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_test"
+    / "spark_iot_kafka_march_transformations_v1"
 )
 
 
@@ -114,23 +122,83 @@ def main():
             )
         )
 
-        events = parsed_stream.select(
-            col("topic"),
-            col("partition"),
-            col("offset"),
-            col("kafka_timestamp"),
-            col("event").isNotNull().alias("json_parsed"),
-            col("event.schema_version").alias("schema_version"),
-            col("event.sensor_id").alias("sensor_id"),
-            col("event.timestamp").alias("event_timestamp"),
-            col("event.measurements.pressure_pa_candidate").alias(
-                "pressure_pa_candidate"
-            ),
-            col("event.measurements.temperature_c").alias("temperature_c"),
-            col("event.measurements.humidity_pct").alias("humidity_pct"),
-            col("event.quality.pressure_status").alias("pressure_status"),
-            col("event.quality.record_status").alias("record_status"),
+        events = (
+    parsed_stream.select(
+        col("topic"),
+        col("partition"),
+        col("offset"),
+        col("kafka_timestamp"),
+        col("event").isNotNull().alias("json_parsed"),
+        col("event.schema_version").alias("schema_version"),
+        col("event.sensor_id").alias("sensor_id"),
+        col("event.timestamp").alias("event_timestamp_raw"),
+        col(
+            "event.measurements.pressure_pa_candidate"
+        ).alias("pressure_pa_candidate"),
+        col("event.measurements.temperature_c").alias(
+            "temperature_c"
+        ),
+        col("event.measurements.humidity_pct").alias(
+            "humidity_pct"
+        ),
+        col("event.quality.pressure_status").alias(
+            "pressure_status"
+        ),
+        col("event.quality.temperature_status").alias(
+            "temperature_status"
+        ),
+        col("event.quality.humidity_status").alias(
+            "humidity_status"
+        ),
+        col("event.quality.humidity_at_boundary").alias(
+            "humidity_at_boundary"
+        ),
+        col("event.quality.record_status").alias(
+            "record_status"
+        ),
+    )
+    .withColumn(
+        "event_timestamp",
+        to_timestamp(col("event_timestamp_raw")),
+    )
+    .withColumn(
+        "timestamp_valid",
+        col("event_timestamp").isNotNull(),
+    )
+    .withColumn(
+        "processing_status",
+        when(
+            ~col("json_parsed"),
+            lit("invalid_json"),
         )
+        .when(
+            col("schema_version").isNull()
+            | (col("schema_version") != lit("1.0")),
+            lit("unsupported_schema"),
+        )
+        .when(
+            col("sensor_id").isNull()
+            | (length(trim(col("sensor_id"))) == 0),
+            lit("invalid_sensor_id"),
+        )
+        .when(
+            col("event_timestamp").isNull(),
+            lit("invalid_timestamp"),
+        )
+        .when(
+            col("record_status") == lit("review_required"),
+            lit("review_required"),
+        )
+        .when(
+            col("record_status").isin(
+                "accepted_candidate",
+                "accepted_with_humidity_boundary",
+            ),
+            lit("accepted"),
+        )
+        .otherwise(lit("unknown_quality_status")),
+    )
+)
 
         CHECKPOINT_DIR.parent.mkdir(
             parents=True,
