@@ -28,3 +28,6 @@ data/processed/*
 
 data/reference/*
 !data/reference/.gitkeep
+
+# Local Docker credentials
+.env.docker

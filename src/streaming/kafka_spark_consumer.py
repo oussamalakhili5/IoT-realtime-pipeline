@@ -4,6 +4,8 @@
 import logging
 import sys
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
@@ -80,7 +82,7 @@ WINDOW_CHECKPOINT_DIR = (
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_pg_windows_v2"
+    / "spark_iot_kafka_march_silo_windows_v1"
 )
 # ---------------------------------------------------------------------------
 # Logging
@@ -178,8 +180,9 @@ def route_batch(batch_df, batch_id):
     )
 
 
+
 def persist_window_metrics_batch(batch_df, batch_id):
-    """Display and persist window metrics for each micro-batch."""
+    """Persist window metrics to PostgreSQL and Silo."""
 
     logger.info(
         "Processing window metrics for micro-batch %s",
@@ -188,21 +191,63 @@ def persist_window_metrics_batch(batch_df, batch_id):
 
     batch_df.show(n=50, truncate=False)
 
-    persist_window_metrics_partition(
-        batch_df.collect()
-    )
+    window_rows = batch_df.collect()
+
+    # PostgreSQL remains the structured analytical database.
+    persist_window_metrics_partition(window_rows)
+
+    if not window_rows:
+        logger.info(
+            "No window metrics to write for micro-batch %s",
+            batch_id,
+        )
+        return
+
+    # Store each micro-batch in its own prefix.
+    silo_path = (
+    "s3a://iot-data-lake/processed/window_metrics/"
+    f"topic={KAFKA_TOPIC}/"
+    f"batch_id={batch_id:020d}"
+ )
+
+    # Overwriting this batch-specific path makes retries idempotent.
+    batch_df.write.mode("overwrite").parquet(silo_path)
 
     logger.info(
-        "Window metrics persisted for micro-batch %s",
+        "Window metrics persisted to PostgreSQL and Silo. "
+        "Micro-batch=%s, rows=%s, path=%s",
         batch_id,
+        len(window_rows),
+        silo_path,
     )
-    # ---------------------------------------------------------------------------
-    # Main streaming application
-    # ---------------------------------------------------------------------------
+
+def main():
+    """Start Kafka ingestion, event routing, and windowed analysis."""
+    load_dotenv(PROJECT_ROOT / ".env.docker")
+
+    minio_access_key = os.getenv("MINIO_ROOT_USER")
+    minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
+
+    if not minio_access_key or not minio_secret_key:
+        raise RuntimeError(
+            "Missing MinIO credentials in .env.docker."
+        )
 
 def main():
     """Start Kafka ingestion, event routing, and windowed analysis."""
 
+    # Load Silo credentials.
+    load_dotenv(PROJECT_ROOT / ".env.docker")
+
+    minio_access_key = os.getenv("MINIO_ROOT_USER")
+    minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD")
+
+    if not minio_access_key or not minio_secret_key:
+        raise RuntimeError(
+            "Missing MinIO credentials in .env.docker."
+        )
+
+    # Configure Spark.
     spark = (
         SparkSession.builder
         .appName("IoT-Real-Time-Kafka-Consumer")
@@ -210,10 +255,38 @@ def main():
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "2")
         .config("spark.sql.session.timeZone", "UTC")
+        .config(
+            "spark.hadoop.fs.s3a.endpoint",
+            "http://localhost:9000",
+        )
+        .config(
+            "spark.hadoop.fs.s3a.access.key",
+            minio_access_key,
+        )
+        .config(
+            "spark.hadoop.fs.s3a.secret.key",
+            minio_secret_key,
+        )
+        .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        .config(
+            "spark.hadoop.fs.s3a.connection.ssl.enabled",
+            "false",
+        )
+        .config(
+            "spark.hadoop.fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
+        )
+        .config(
+            "spark.hadoop.fs.s3a.impl",
+            "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        )
         .getOrCreate()
     )
 
     spark.sparkContext.setLogLevel("WARN")
+
+    # Keep the rest of your existing main() function below.
+
 
     try:
         logger.info("Starting Spark Structured Streaming.")
