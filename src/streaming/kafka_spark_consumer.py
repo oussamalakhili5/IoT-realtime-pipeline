@@ -1,6 +1,8 @@
+
 """Consume, validate, and analyze IoT events with Spark Structured Streaming."""
 
 import logging
+import sys
 from pathlib import Path
 
 from pyspark.sql import SparkSession
@@ -29,24 +31,48 @@ from pyspark.sql.types import (
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Project imports and configuration
 # ---------------------------------------------------------------------------
 
+# Add the project root to Python's import path.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
-KAFKA_TOPIC = "iot-sensor-events-march-geospatial-test"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
+    # Import project modules only after configuring the path.
+from src.storage.postgres_writer import (
+    persist_sensor_events_partition,
+    persist_window_metrics_partition,
+)
+
+
+from src.streaming.anomaly_rules import (
+    MAX_HUMIDITY_RANGE_PCT,
+    MAX_PRESSURE_RANGE_PA,
+    MAX_TEMPERATURE_RANGE_C,
+    MIN_OBSERVATIONS_PER_METRIC,
+)
+
+
+KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+# KAFKA_TOPIC = "iot-sensor-events-march-geospatial-test"
+# KAFKA_TOPIC = "iot-sensor-events-march-pipeline"
 WINDOW_DURATION = "10 minutes"
 WINDOW_SLIDE = "5 minutes"
 WATERMARK_DELAY = "10 minutes"
+
+MAX_OFFSETS_PER_TRIGGER = 100
+PROCESSING_INTERVAL = "5 seconds"
+
+KAFKA_TOPIC = "iot-sensor-events-march-pipeline"
 
 CHECKPOINT_DIR = (
     PROJECT_ROOT
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_anomaly_routing_v1"
+    / "spark_iot_kafka_march_pg_routing_v1"
 )
 
 WINDOW_CHECKPOINT_DIR = (
@@ -54,13 +80,8 @@ WINDOW_CHECKPOINT_DIR = (
     / "data"
     / "interim"
     / "checkpoints"
-    / "spark_iot_kafka_march_anomaly_windows_v1"
+    / "spark_iot_kafka_march_pg_windows_v2"
 )
-
-MAX_OFFSETS_PER_TRIGGER = 100
-PROCESSING_INTERVAL = "5 seconds"
-
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -129,7 +150,7 @@ EVENT_SCHEMA = StructType(
 # ---------------------------------------------------------------------------
 
 def route_batch(batch_df, batch_id):
-    """Route each micro-batch into accepted and review-required events."""
+    """Route events and persist accepted records to PostgreSQL."""
 
     accepted_events = batch_df.filter(
         col("processing_status") == "accepted"
@@ -147,13 +168,40 @@ def route_batch(batch_df, batch_id):
     print(f"\n=== BATCH {batch_id}: EVENTS REQUIRING REVIEW ===")
     review_events.show(n=10, truncate=False)
 
+    persist_sensor_events_partition(
+    accepted_events.collect()
+    )
 
+    logger.info(
+        "Accepted events persisted for micro-batch %s",
+        batch_id,
+    )
+
+
+def persist_window_metrics_batch(batch_df, batch_id):
+    """Display and persist window metrics for each micro-batch."""
+
+    logger.info(
+        "Processing window metrics for micro-batch %s",
+        batch_id,
+    )
+
+    batch_df.show(n=50, truncate=False)
+
+    persist_window_metrics_partition(
+        batch_df.collect()
+    )
+
+    logger.info(
+        "Window metrics persisted for micro-batch %s",
+        batch_id,
+    )
     # ---------------------------------------------------------------------------
     # Main streaming application
     # ---------------------------------------------------------------------------
 
 def main():
-    """Start Kafka ingestion, event routing, and windowed aggregations."""
+    """Start Kafka ingestion, event routing, and windowed analysis."""
 
     spark = (
         SparkSession.builder
@@ -176,6 +224,14 @@ def main():
             WINDOW_DURATION,
             WINDOW_SLIDE,
             WATERMARK_DELAY,
+        )
+        logger.info(
+            "Anomaly thresholds: pressure=%s Pa, temperature=%s C, "
+            "humidity=%s pct, minimum observations=%s",
+            MAX_PRESSURE_RANGE_PA,
+            MAX_TEMPERATURE_RANGE_C,
+            MAX_HUMIDITY_RANGE_PCT,
+            MIN_OBSERVATIONS_PER_METRIC,
         )
 
         # -------------------------------------------------------------------
@@ -218,7 +274,7 @@ def main():
         )
 
         # -------------------------------------------------------------------
-        # 3. Flatten event fields and assess processing status
+        # 3. Flatten events and assess processing status
         # -------------------------------------------------------------------
 
         events = (
@@ -282,9 +338,7 @@ def main():
                 )
                 .when(
                     col("schema_version").isNull()
-                    | (
-                        ~col("schema_version").isin("1.0", "1.1")
-                    ),
+                    | (~col("schema_version").isin("1.0", "1.1")),
                     lit("unsupported_schema"),
                 )
                 .when(
@@ -314,7 +368,7 @@ def main():
         )
 
         # -------------------------------------------------------------------
-        # 4. Route accepted events to the analytical stream
+        # 4. Select accepted events for analytical processing
         # -------------------------------------------------------------------
 
         accepted_events = events.filter(
@@ -323,7 +377,7 @@ def main():
         )
 
         # -------------------------------------------------------------------
-        # 5. Calculate sliding-window statistics per sensor
+        # 5. Calculate sliding-window statistics
         # -------------------------------------------------------------------
 
         windowed_metrics = (
@@ -333,19 +387,28 @@ def main():
                 WATERMARK_DELAY,
             )
             .groupBy(
-                window(
-                    col("event_timestamp"),
-                    WINDOW_DURATION,
-                    WINDOW_SLIDE,
-                ),
-                col("sensor_id"),
-                col("location_id"),
-                col("latitude"),
-                col("longitude"),
+                    window(
+                        col("event_timestamp"),
+                        WINDOW_DURATION,
+                        WINDOW_SLIDE,
+                    ),
+                    col("topic"),
+                    col("sensor_id"),
+                    col("location_id"),
+                    col("latitude"),
+                    col("longitude"),
             )
             .agg(
                 count("*").alias("measurement_count"),
-
+                count("pressure_pa_candidate").alias(
+                    "pressure_observation_count"
+                ),
+                count("temperature_c").alias(
+                    "temperature_observation_count"
+                ),
+                count("humidity_pct").alias(
+                    "humidity_observation_count"
+                ),
                 avg("pressure_pa_candidate").alias(
                     "avg_pressure_pa"
                 ),
@@ -358,7 +421,6 @@ def main():
                 stddev_pop("pressure_pa_candidate").alias(
                     "stddev_pressure_pa"
                 ),
-
                 avg("temperature_c").alias(
                     "avg_temperature_c"
                 ),
@@ -371,7 +433,6 @@ def main():
                 stddev_pop("temperature_c").alias(
                     "stddev_temperature_c"
                 ),
-
                 avg("humidity_pct").alias(
                     "avg_humidity_pct"
                 ),
@@ -388,6 +449,7 @@ def main():
             .select(
                 col("window.start").alias("window_start"),
                 col("window.end").alias("window_end"),
+                col("topic"),
                 col("sensor_id"),
                 col("location_id"),
                 col("latitude"),
@@ -405,11 +467,57 @@ def main():
                 col("min_humidity_pct"),
                 col("max_humidity_pct"),
                 col("stddev_humidity_pct"),
+                col("pressure_observation_count"),
+                col("temperature_observation_count"),
+                col("humidity_observation_count"),
+            )
+            .withColumn(
+                "pressure_range_pa",
+                col("max_pressure_pa") - col("min_pressure_pa"),
+            )
+            .withColumn(
+                "temperature_range_c",
+                col("max_temperature_c") - col("min_temperature_c"),
+            )
+            .withColumn(
+                "humidity_range_pct",
+                col("max_humidity_pct") - col("min_humidity_pct"),
+            )
+            .withColumn(
+                "pressure_variation_anomaly",
+                col("pressure_range_pa") > MAX_PRESSURE_RANGE_PA,
+            )
+            .withColumn(
+                "temperature_variation_anomaly",
+                col("temperature_range_c") > MAX_TEMPERATURE_RANGE_C,
+            )
+            .withColumn(
+                "humidity_variation_anomaly",
+                col("humidity_range_pct") > MAX_HUMIDITY_RANGE_PCT,
+            )
+            .withColumn(
+                "anomaly_status",
+                when(
+                    (col("pressure_observation_count")
+                    < MIN_OBSERVATIONS_PER_METRIC)
+                    | (col("temperature_observation_count")
+                    < MIN_OBSERVATIONS_PER_METRIC)
+                    | (col("humidity_observation_count")
+                    < MIN_OBSERVATIONS_PER_METRIC),
+                    lit("insufficient_data"),
+                )
+                .when(
+                    col("pressure_variation_anomaly")
+                    | col("temperature_variation_anomaly")
+                    | col("humidity_variation_anomaly"),
+                    lit("anomaly_suspected"),
+                )
+                .otherwise(lit("normal")),
             )
         )
 
         # -------------------------------------------------------------------
-        # 6. Prepare checkpoint parent directories
+        # 6. Prepare checkpoint directories
         # -------------------------------------------------------------------
 
         CHECKPOINT_DIR.parent.mkdir(
@@ -441,16 +549,14 @@ def main():
         )
 
         # -------------------------------------------------------------------
-        # 8. Start the sliding-window aggregation query
+        # 8. Start the sliding-window metrics query
         # -------------------------------------------------------------------
 
         metrics_query = (
             windowed_metrics.writeStream
             .queryName("iot_sensor_window_metrics")
-            .format("console")
+            .foreachBatch(persist_window_metrics_batch)
             .outputMode("update")
-            .option("truncate", "false")
-            .option("numRows", "50")
             .option(
                 "checkpointLocation",
                 WINDOW_CHECKPOINT_DIR.as_posix(),
