@@ -84,6 +84,58 @@ class TestEventSchema(unittest.TestCase):
         self.assertIsNone(measurements["temperature_c"])
         self.assertIsNone(measurements["humidity_pct"])
 
+    def test_empty_and_non_finite_optional_values_become_none(self):
+        event = build_event(
+            make_sample_row(
+                location="",
+                lat="",
+                lon=None,
+                pressure_numeric=float("inf"),
+                pressure_pa_candidate=float("-inf"),
+                pressure_unit_candidate="",
+                temperature_value=float("nan"),
+                humidity_value="",
+            )
+        )
+
+        self.assertEqual(
+            event["location"],
+            {"location_id": None, "latitude": None, "longitude": None},
+        )
+        self.assertIsNone(event["measurements"]["pressure_numeric"])
+        self.assertIsNone(event["measurements"]["pressure_pa_candidate"])
+        self.assertIsNone(event["measurements"]["pressure_unit_candidate"])
+        self.assertIsNone(event["measurements"]["temperature_c"])
+        self.assertIsNone(event["measurements"]["humidity_pct"])
+
+    def test_absent_optional_source_fields_remain_missing(self):
+        row = make_sample_row()
+        for field in (
+            "location",
+            "lat",
+            "lon",
+            "pressure_numeric",
+            "pressure_pa_candidate",
+            "pressure_unit_candidate",
+            "temperature_value",
+            "humidity_value",
+        ):
+            row.pop(field)
+
+        event = build_event(row)
+
+        self.assertIsNone(event["location"]["location_id"])
+        self.assertIsNone(event["location"]["latitude"])
+        self.assertIsNone(event["location"]["longitude"])
+        self.assertIsNone(event["measurements"]["pressure_numeric"])
+        self.assertIsNone(event["measurements"]["pressure_pa_candidate"])
+        self.assertIsNone(event["measurements"]["temperature_c"])
+        self.assertIsNone(event["measurements"]["humidity_pct"])
+
+    def test_empty_required_text_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "sensor_id.*empty"):
+            build_event(make_sample_row(sensor_id=""))
+
     def test_requires_sensor_identifier(self):
         with self.assertRaises(ValueError):
             build_event(make_sample_row(sensor_id=None))
