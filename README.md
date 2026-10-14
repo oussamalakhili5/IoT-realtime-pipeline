@@ -1,292 +1,320 @@
-# 🌐 IoT Real-Time Data Pipeline
+# IoT Real-Time Data Pipeline
 
-<p align="center">
-  <strong>A Local Streaming Data Engineering Project for IoT Event Processing, Anomaly Detection, and Analytics</strong>
-</p>
+**A local real-time data engineering pipeline for IoT sensor ingestion, stream processing, data quality, anomaly detection, and analytics.**
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-Data%20Ingestion-3776AB?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/Apache%20Kafka-Event%20Streaming-231F20?logo=apachekafka&logoColor=white" alt="Apache Kafka">
-  <img src="https://img.shields.io/badge/Apache%20Spark-Structured%20Streaming-E25A1C?logo=apachespark&logoColor=white" alt="Apache Spark">
-  <img src="https://img.shields.io/badge/Docker-Containerization-2496ED?logo=docker&logoColor=white" alt="Docker">
-  <img src="https://img.shields.io/badge/MinIO-Object%20Storage-C72C48?logo=minio&logoColor=white" alt="MinIO">
-  <img src="https://img.shields.io/badge/PostgreSQL-Analytical%20Storage-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
-  <img src="https://img.shields.io/badge/Grafana-Visualization-F46800?logo=grafana&logoColor=white" alt="Grafana">
-</p>
+The project processes March 2026 BME280 sensor measurements using Python, Apache Kafka, Apache Spark Structured Streaming, Silo/MinIO object storage, PostgreSQL, and Grafana.
+
+A Python producer reads CSV records incrementally and publishes versioned JSON events to Kafka. Spark processes the event stream, classifies data quality, computes event-time window metrics, and detects potentially abnormal measurements. In the Strategy B persistence mode, detailed event records and window metrics are archived as Parquet in Silo/MinIO, while compact analytical summaries and anomaly information are persisted in PostgreSQL.
+
+> **Project scope:** The original dataset contains approximately 87.3 million rows. Only controlled subsets of 10,000, 100,000, and 250,000 events have been used for pipeline benchmarks. The complete dataset has not been processed.
 
 ---
 
-## 📌 Project Overview
+## Table of Contents
 
-This project implements a local **IoT Real-Time Data Pipeline** designed to ingest, validate, process, and analyze environmental sensor measurements.
+- [Project Overview](#project-overview)
+- [Architecture](#architecture)
+- [Key Features](#key-features)
+- [Technology Stack](#technology-stack)
+- [Data Flow](#data-flow)
+- [Persistence Strategy](#persistence-strategy)
+- [Repository Structure](#repository-structure)
+- [Local Environment and Docker](#local-environment-and-docker)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Running a Controlled Benchmark](#running-a-controlled-benchmark)
+- [Testing](#testing)
+- [Benchmark Results](#benchmark-results)
+- [Grafana Dashboards](#grafana-dashboards)
+- [Limitations and Future Improvements](#limitations-and-future-improvements)
 
-A Python producer reads a historical BME280 sensor dataset and publishes versioned JSON events to Apache Kafka. Spark Structured Streaming consumes these events, applies data-quality rules, calculates event-time window metrics, and identifies potential anomalies.
+---
 
-Processed event records and detailed window metrics are archived in Parquet format in **MinIO, deployed through Docker**, while PostgreSQL stores analytical summaries, window-status counts, anomaly details, and streaming progress. Grafana provides dashboards for exploring the resulting data.
+## Project Overview
 
-The project focuses on learning and validating a practical streaming architecture using controlled local workloads.
+The objective is to build and validate a local, streaming-oriented data pipeline that demonstrates how IoT sensor records can be ingested, processed, stored, and analyzed.
 
-> **Dataset scope:** The source dataset contains approximately **87.3 million rows**. The complete dataset was not processed. Development and validation used controlled subsets of 10,000, 100,000, and 250,000 events. These results do not establish full-dataset processing or production-scale performance.
+### Project Objectives
 
-## 🏗️ Architecture
+- Ingest IoT sensor data incrementally from a CSV source.
+- Publish validated and versioned JSON events to Apache Kafka.
+- Process incoming events using Spark Structured Streaming.
+- Classify records according to data-quality rules.
+- Calculate event-time sliding-window metrics.
+- Identify potentially abnormal pressure, temperature, and humidity measurements.
+- Archive classified events and detailed window metrics in Parquet format.
+- Store compact analytical summaries and anomaly information in PostgreSQL.
+- Visualize the resulting metrics using Grafana.
+
+### Dataset Profile
+
+| Attribute | Description |
+|---|---|
+| Source | Sensor.Community BME280 sensor measurements |
+| Period | March 2026 |
+| Original dataset size | 87,298,799 rows |
+| Distinct sensors reported | 5,156 |
+| Invalid timestamps reported | 18,038 |
+| Processing approach | Incremental ingestion and bounded replays |
+| Largest completed benchmark | 250,000 events |
+
+The original dataset was not processed end to end. All benchmark results in this repository refer to controlled local runs.
+
+---
+
+## Architecture
+
+The following diagram illustrates the overall pipeline, its main processing stages, the two persistence destinations, and the local deployment arrangement.
+
+![IoT Real-Time Data Pipeline Architecture](./IoT%20Real-Time%20Data%20Pipeline%20Architecture.png)
+
+### Logical Architecture
 
 ```mermaid
 flowchart LR
     A["BME280 CSV Dataset"] --> B["Python Producer"]
-    B -->|"Versioned JSON"| C["Apache Kafka"]
-
+    B -->|"Versioned JSON events"| C["Apache Kafka"]
     C --> D["Spark Structured Streaming"]
-    D --> E["Validation and Classification"]
+
+    D --> E["Parsing and Data Quality"]
     E --> F["Event-Time Windows"]
-    E --> G["Anomaly Detection"]
+    F --> G["Anomaly Detection"]
 
-    E -->|"Classified Events"| H["MinIO / Parquet"]
-    F -->|"Window Metrics"| H
+    D --> H["Silo / MinIO"]
+    G --> H
+    H --> I["Parquet Event Archives"]
+    H --> J["Parquet Window Metrics"]
 
-    H --- I["Docker Container"]
+    D --> K["PostgreSQL"]
+    K --> L["Hourly and Daily Summaries"]
+    K --> M["Window Status and Anomalies"]
+    K --> N["Batch Progress"]
 
-    E -->|"Event Summaries"| J["PostgreSQL"]
-    F -->|"Window Status"| J
-    G -->|"Anomaly Details"| J
-
-    J --> K["Grafana Dashboards"]
-
-    style A fill:#E8F2FF,stroke:#3776AB,color:#172B4D
-    style B fill:#E9F7EF,stroke:#26935B,color:#164A2C
-    style C fill:#FFF3E0,stroke:#D97706,color:#713F12
-    style D fill:#FCE7E7,stroke:#E25A1C,color:#7F1D1D
-    style H fill:#FCE7F3,stroke:#C72C48,color:#831843
-    style J fill:#E8EEFF,stroke:#4169E1,color:#1E3A8A
-    style K fill:#FFF0E6,stroke:#F46800,color:#7C2D12
+    L --> O["Grafana"]
+    M --> O
+    N --> O
 ```
 
-### Architecture Responsibilities
+### Main Components
 
 | Component | Responsibility |
 |---|---|
-| CSV Dataset | Source of historical sensor measurements |
-| Python Producer | Reads CSV records, applies source-level checks, constructs JSON events, and publishes to Kafka |
-| Apache Kafka | Buffers and distributes streaming events |
-| Spark Structured Streaming | Parses events, classifies records, calculates windows, and detects potential anomalies |
-| Docker | Runs the MinIO object-storage service through Docker Compose |
-| MinIO | Stores event archives and detailed window metrics as Parquet files |
-| PostgreSQL | Stores analytical summaries, window-status counts, anomaly details, and batch progress |
-| Grafana | Visualizes PostgreSQL data through manually configured dashboard panels |
+| Python producer | Reads CSV data, validates measurements, builds JSON events, and publishes to Kafka. |
+| Apache Kafka | Buffers and distributes the streaming events through Kafka topics. |
+| Spark Structured Streaming | Parses and classifies events, processes event-time windows, and routes outputs to the persistence layers. |
+| Silo / MinIO | Stores classified event records and detailed window metrics as Parquet files. |
+| PostgreSQL | Stores compact event summaries, hourly window-status counts, suspected anomalies, and processing progress. |
+| Grafana | Visualizes analytical results through manually configured dashboards and panels. |
+| Docker Compose | Defines the MinIO service used by the local pipeline. |
 
-### Runtime Deployment
+The architecture image is an overview. Consult the implementation and configuration files for the exact runtime behavior.
 
-The project uses a hybrid local-development setup rather than running the entire stack in containers.
+---
 
-| Component | Execution environment |
-|---|---|
-| Python producer | Local Python virtual environment |
-| Apache Kafka | Local installation |
-| Spark Structured Streaming | Local PySpark installation |
-| PostgreSQL / PostGIS | Local PostgreSQL installation |
-| MinIO | Docker container |
-| Grafana | Used for dashboard visualization; deployment and provisioning must be configured separately |
+## Key Features
 
-The current `docker-compose.yml` defines the MinIO service. It does not automatically provision Kafka, Spark, PostgreSQL, or importable Grafana dashboards.
+### 1. Incremental Data Ingestion
 
-## 🔄 Data Flow
+The Python producer reads the source CSV incrementally rather than loading the entire dataset into memory.
 
-### 1. Ingestion
+It supports bounded message publishing, configurable chunk sizes, and a producer progress file for tracking an ingestion run.
 
-The producer in `src/ingestion/kafka_producer.py` reads a semicolon-delimited CSV incrementally, normalizes measurement values, validates timestamps against the supported period, and applies measurement-quality rules.
+### 2. Versioned JSON Events
 
-It builds versioned JSON events and publishes them to the configured Kafka topic.
+The producer builds JSON events using schema version **1.1**. The Spark consumer supports versions 1.0 and 1.1.
 
-### 2. Event Streaming
+The processing logic handles malformed JSON, unsupported schema versions, and measurement-quality classifications.
 
-Apache Kafka buffers the published events. The Spark consumer reads the configured topic using Structured Streaming and tracks Kafka source metadata such as the topic, partition, and offset.
+### 3. Stream Processing
 
-The producer emits event schema version `1.1`; the consumer accepts schema versions `1.0` and `1.1`.
+Spark Structured Streaming consumes messages from Kafka and processes the incoming data in micro-batches.
 
-### 3. Processing and Classification
-
-Spark parses and classifies the incoming records. The implementation handles invalid JSON payloads, unsupported schema versions, and measurement-quality statuses.
-
-Accepted events feed the event-time aggregation pipeline.
-
-### 4. Windowed Analytics
-
-The current window configuration is:
+The window configuration is:
 
 | Parameter | Value |
-|---|---|
+|---|---:|
 | Window duration | 10 minutes |
 | Slide interval | 5 minutes |
 | Watermark | 10 minutes |
-| Minimum observations | 3 |
-| Pressure-range anomaly threshold | 1,000 Pa |
-| Temperature-range anomaly threshold | 5 °C |
-| Humidity-range anomaly threshold | 20 percentage points |
+| Minimum observations for measurement classification | 3 |
 
-The pipeline classifies windows according to the implemented rules, including `normal`, `anomaly_suspected`, and `insufficient_data`.
+A finite replay may leave the newest event-time windows unfinalized. An empty Kafka topic does not, by itself, prove that every window has been emitted.
 
-A finite replay does not automatically guarantee that every event-time window has been finalized. Window results must be checked against the watermark and persisted output.
+### 4. Data Quality and Anomaly Detection
 
-### 5. Persistence
+The pipeline applies measurement rules and evaluates variations in:
 
-The implementation uses a configurable persistence strategy.
+- Pressure
+- Temperature
+- Humidity
 
-Under Strategy B:
+The implemented window-level thresholds are a pressure range of 1,000 Pa, a temperature range of 5 °C, and a humidity range of 20 percentage points.
 
-- Classified event records are archived in MinIO as Parquet.
-- Detailed window metrics are archived in MinIO as Parquet.
-- Accepted-event hourly and daily summaries are stored in PostgreSQL.
-- Hourly window-status counts are stored in PostgreSQL.
-- Suspected anomaly details and per-sink progress are stored in PostgreSQL.
+Windows with fewer than three observations for a measurement can be classified as `insufficient_data`.
 
-### 6. Visualization
+Pressure normalization is heuristic. Normalized pascal values should be treated as candidate values rather than independent proof of the original sensor unit.
 
-Grafana queries the PostgreSQL summary tables to display accepted-event counts, time-series metrics, window statuses, anomaly indicators, sensor activity, and other relevant analytical views.
+### 5. Analytical Storage
 
-The repository includes PNG screenshots of selected panels. Importable Grafana dashboard JSON and provisioning files are not currently included.
+The pipeline separates detailed records from aggregated analytical data.
 
-## 🧰 Technology Stack
+Detailed event records and window metrics are archived in Silo/MinIO as Parquet. PostgreSQL stores compact summaries, anomaly details, and per-sink batch progress.
+
+---
+
+## Technology Stack
 
 | Category | Technology |
 |---|---|
-| Programming | Python |
-| Event ingestion | Python `csv` module |
-| Messaging | Apache Kafka |
-| Stream processing | PySpark Structured Streaming |
-| Event format | Versioned JSON |
-| Object storage | MinIO |
-| Containerization | Docker and Docker Compose |
-| Archive format | Apache Parquet |
-| S3-compatible access | Hadoop S3A |
-| Analytical database | PostgreSQL |
-| Database connectivity | `psycopg2` |
+| Programming language | Python |
+| Input format | CSV |
+| Event format | JSON |
+| Message broker | Apache Kafka |
+| Stream processing | Apache Spark Structured Streaming / PySpark |
+| Object storage | Silo / MinIO |
+| Object storage format | Parquet |
+| Object storage connector | Hadoop S3A |
+| Relational database | PostgreSQL |
+| Geospatial extension | PostGIS available in the local PostgreSQL environment |
 | Visualization | Grafana |
-| Geospatial database capability | PostGIS geometry columns in legacy tables |
+| Containerization | Docker Compose for MinIO |
+| Testing | Python `unittest` |
 
-The previously recorded local environment used Python 3.14.7, PySpark 3.5.9, Hadoop AWS 3.3.4, Java 21, and PostgreSQL 18. These are environment observations, not a pinned dependency specification.
+Kafka, Spark, and PostgreSQL are managed locally in the current environment. MinIO is containerized with Docker. Grafana panels are configured manually; this repository does not include importable Grafana dashboard definitions or dashboard provisioning.
 
-Spark's Kafka and S3A connectors must be compatible with the selected Spark, Scala, and Hadoop versions. The repository does not currently provide a complete dependency lock file.
+The repository does not currently provide a pinned Python dependency manifest. Connector versions must be compatible with the installed Spark, Scala, Hadoop, and Java runtime.
 
-## ✨ Key Features
+---
 
-- Incremental CSV ingestion and bounded message publishing.
-- Versioned JSON payloads and schema validation.
-- Kafka-based event streaming.
-- Data-quality classification and measurement validation.
-- Spark Structured Streaming with sliding event-time windows.
-- Threshold-based anomaly indicators.
-- Parquet archives in MinIO object storage.
-- Docker-based MinIO execution.
-- PostgreSQL analytical summaries and batch-progress tracking.
-- Grafana panels for data exploration and monitoring.
-- Dedicated topic, run ID, and checkpoint configuration for isolated benchmark runs.
+## Data Flow
 
-## 🗄️ Persistence Strategy
+### Step 1 — CSV Ingestion
 
-The consumer's historical defaults use PostgreSQL for detailed event and window persistence. **Strategy B** is an opt-in configuration that stores detailed records in MinIO and compact analytical outputs in PostgreSQL.
+The producer in `src/ingestion/kafka_producer.py` reads the semicolon-delimited CSV incrementally.
+
+It normalizes source values, checks the expected March 2026 timestamp range, applies measurement-quality rules, and creates JSON events.
+
+### Step 2 — Kafka Publishing
+
+The producer publishes JSON events to a configured Kafka topic.
+
+The producer and consumer have different default topic names, so the topic should be specified explicitly for a new run.
+
+### Step 3 — Spark Processing
+
+The Spark consumer parses the events, handles malformed payloads and unsupported schema versions, and classifies the data.
+
+Kafka lineage information is retained in the processed output, including topic, partition, offset, and Kafka timestamp.
+
+### Step 4 — Window Analytics
+
+Accepted events feed event-time sliding windows. Window metrics are evaluated against the implemented anomaly thresholds.
+
+### Step 5 — Data Persistence
+
+Spark writes detailed classified events and window metrics to Silo/MinIO as Parquet. Under Strategy B, PostgreSQL receives compact summaries, window-status counts, suspected anomaly details, and per-sink processing progress.
+
+### Step 6 — Visualization
+
+Grafana queries PostgreSQL to display event counts, data quality metrics, window statuses, anomaly information, sensor activity, and measurements over time.
+
+---
+
+## Persistence Strategy
+
+The consumer's historical default persistence modes are PostgreSQL-based. **Strategy B is opt-in** and uses object storage for detailed outputs alongside PostgreSQL summaries.
 
 ### Strategy B Configuration
 
-```powershell
-$env:IOT_SPARK_EVENT_PERSISTENCE_MODE = "silo"
-$env:IOT_SPARK_WINDOW_PERSISTENCE_MODE = "silo_summaries"
+```text
+IOT_SPARK_EVENT_PERSISTENCE_MODE=silo
+IOT_SPARK_WINDOW_PERSISTENCE_MODE=silo_summaries
 ```
 
-A dedicated `IOT_SPARK_EVENT_SILO_RUN_ID` is required for the event archive and associated summaries.
+The Strategy B window mode requires the event persistence mode to be set to `silo`, a run ID, and separate checkpoint directories for the two Spark queries.
 
-### Storage Layout
+### Data Destinations
 
 | Data | Destination |
 |---|---|
-| Classified events | MinIO Parquet under `processed/event_records/` |
-| Detailed window metrics | MinIO Parquet under `processed/window_metrics/` |
+| Classified event records, including accepted and review-required events | Silo/MinIO Parquet |
+| Detailed window metrics | Silo/MinIO Parquet |
 | Accepted-event hourly summaries | `iot_global_hourly_summaries` |
-| Accepted-event daily summaries | `iot_daily_sensor_summaries` |
+| Accepted-event daily sensor summaries | `iot_daily_sensor_summaries` |
 | Hourly window-status counts | `iot_window_status_hourly` |
 | Suspected anomaly details | `iot_sensor_window_anomalies` |
-| Sink processing progress | `iot_stream_batch_progress` |
+| Sink batch progress | `iot_stream_batch_progress` |
 
-Silo paths are scoped by Kafka topic, run ID, and batch ID. Event-routing and window-processing queries use separate Spark checkpoints.
+### Object Storage Layout
 
-Batch-level retry handling is implemented, but writes to MinIO and transactions in PostgreSQL are not part of a shared distributed transaction. A partial Parquet prefix may be visible after a failed write. The project does not claim end-to-end exactly-once delivery across Kafka, MinIO, and PostgreSQL.
-
-## 🐳 Docker and MinIO Setup
-
-MinIO provides S3-compatible object storage for Parquet archives. It is executed in a Docker container while Kafka, Spark, and PostgreSQL remain local services.
-
-### Prerequisites
-
-- Docker Desktop installed and running.
-- A local `.env.docker` file containing MinIO credentials.
-- The project's `docker-compose.yml`.
-- An `iot-data-lake` bucket in MinIO.
-
-Keep `.env.docker` local and do not commit credentials.
-
-### 1. Start MinIO
-
-From the project root in PowerShell:
-
-```powershell
-docker compose --env-file .env.docker up -d minio
-```
-
-Check the service:
-
-```powershell
-docker compose ps
-```
-
-### 2. Open the MinIO Console
-
-The local endpoints are:
-
-| Service | Address |
-|---|---|
-| S3 API | `http://localhost:9000` |
-| MinIO Console | `http://localhost:9001` |
-
-Sign in using the credentials configured locally in `.env.docker`.
-
-### 3. Create or Verify the Bucket
-
-Create the bucket named:
+Event archives:
 
 ```text
-iot-data-lake
+processed/event_records/
+  topic=<topic>/
+    run_id=<run-id>/
+      batch_id=<batch-id>/
 ```
 
-The bucket must exist before Spark writes the Parquet archives. The current Compose definition and pipeline do not automatically provision it.
+Window metrics:
 
-### 4. Configure Spark Access
-
-The consumer reads MinIO credentials from `.env.docker` and expects the endpoint `http://localhost:9000`, path-style S3 access, and the `iot-data-lake` bucket.
-
-The Spark Kafka connector and Hadoop S3A libraries must be available to the Spark runtime. Configure compatible connector versions before starting a new run.
-
-For example, the previously used connector configuration was:
-
-```powershell
-$env:PYSPARK_SUBMIT_ARGS = "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.9,org.apache.hadoop:hadoop-aws:3.3.4 pyspark-shell"
+```text
+processed/window_metrics/
+  topic=<topic>/
+    run_id=<run-id>/
+      batch_id=<batch-id>/
 ```
 
-Verify compatibility with the local runtime before using this example.
+The project uses deterministic topic/run/batch paths. Retries target the same batch prefix, and PostgreSQL summary writes and progress updates use database transactions.
 
-## 📁 Repository Structure
+However, Silo and PostgreSQL do not share a distributed transaction. A partial Parquet output can remain visible after a failed write, and the project does not guarantee end-to-end exactly-once delivery across all components.
+
+Use a unique topic, run ID, producer progress file, and separate Spark checkpoint paths for each new benchmark. To resume an interrupted run, preserve the original run identity and artifacts rather than reusing them for a different input.
+
+The SQL file `sql/streaming_summary_schema.sql` defines the five Strategy B tables. The application does not apply this DDL automatically. Inspect the target database schema before applying it.
+
+---
+
+## Repository Structure
+
+The main repository layout is:
 
 ```text
 IoT-realtime-pipeline/
-├── dashboards/                  # Grafana panel screenshots
-├── data/                        # Local datasets and checkpoints; not committed
+├── README.md
+├── IoT Real-Time Data Pipeline Architecture.png
+├── docker-compose.yml
+│
+├── dashboards/
+│   ├── accepted-events.png
+│   ├── data-quality.png
+│   ├── hourly-average-humidity.png
+│   ├── hourly-average-pressure.png
+│   ├── hourly-average-temperature.png
+│   ├── hourly-event-volume.png
+│   ├── sensor-geographic-map.png
+│   ├── suspected-anomalies.png
+│   ├── top-active-sensors.png
+│   └── window-status-distribution.png
+│
+├── data/
+│   └── ...                  # Local datasets and processing artifacts
+│
 ├── docs/
 │   ├── event_schema.md
 │   └── window_persistence_strategy.md
-├── reports/                     # Profiling and data-quality reports
+│
+├── reports/
+│   └── ...                  # Dataset profiling and measurement reports
+│
 ├── scripts/
 │   └── test_silo_spark.py
+│
 ├── src/
 │   ├── ingestion/
 │   │   └── kafka_producer.py
 │   ├── profiling/
+│   │   └── ...
 │   ├── storage/
 │   │   └── postgres_writer.py
 │   └── streaming/
@@ -297,224 +325,279 @@ IoT-realtime-pipeline/
 │       ├── kafka_spark_consumer.py
 │       ├── measurement_rules.py
 │       └── pressure_rules.py
+│
 ├── sql/
 │   └── streaming_summary_schema.sql
-├── tests/
-│   └── unit/
-├── docker-compose.yml           # MinIO service
-└── README.md
+│
+└── tests/
+    └── unit/
+        └── ...
 ```
 
-The diagnostic script `scripts/test_silo_spark.py` writes to a fixed Silo prefix using overwrite mode. Inspect that destination before running it.
+The `data/` directory may contain large local datasets, checkpoints, and progress files. Such local artifacts should not be committed accidentally.
 
-## ⚙️ Configuration
+The diagnostic script `scripts/test_silo_spark.py` writes to a fixed Silo prefix using overwrite mode. Inspect its destination before running it.
+
+---
+
+## Local Environment and Docker
+
+The application pipeline is currently run locally, while MinIO runs in Docker.
+
+| Component | Execution environment |
+|---|---|
+| Python producer | Local |
+| Apache Kafka | Local |
+| Apache Spark Structured Streaming | Local |
+| PostgreSQL / PostGIS | Local |
+| MinIO / Silo object storage | Docker |
+| Grafana | Manual dashboard setup; not provisioned by the project's Compose file |
+
+The current `docker-compose.yml` defines the MinIO service only. It does not deploy Kafka, Spark, PostgreSQL, or Grafana.
+
+### Start MinIO
+
+Make sure Docker Desktop is running and the local `.env.docker` configuration file exists.
+
+From the repository root, run:
+
+```powershell
+docker compose --env-file .env.docker up -d minio
+```
+
+Configured endpoints:
+
+| Service | Endpoint |
+|---|---|
+| MinIO S3 API | `http://localhost:9000` |
+| MinIO Console | `http://localhost:9001` |
+| Expected bucket | `iot-data-lake` |
+| Grafana, when running | `http://localhost:3000` |
+
+The bucket must exist before the pipeline writes to it unless it has been provisioned separately. Kafka and PostgreSQL must be started and configured independently.
+
+Keep `.env` and `.env.docker` local. They contain connection configuration and credentials and must never be committed.
+
+---
+
+## Prerequisites
+
+A local environment requires:
+
+- Python with the project's dependencies.
+- Java and a compatible Spark/PySpark installation.
+- Apache Kafka and a running broker.
+- PostgreSQL with the tables required by the selected persistence mode.
+- Docker Desktop and Docker Compose for MinIO.
+- Spark Kafka source connector and Hadoop S3A connector libraries compatible with the selected runtime.
+- A configured MinIO bucket and local credentials.
+- A Grafana instance with a PostgreSQL data source for dashboard visualization.
+
+The repository currently has no dependency lock file or single-command environment installation. Package and connector compatibility must be managed explicitly.
+
+---
+
+## Configuration
 
 The consumer supports the following environment variables:
 
-| Variable | Purpose | Default / Requirement |
+| Variable | Purpose | Default or requirement |
 |---|---|---|
 | `IOT_KAFKA_TOPIC` | Kafka topic consumed by Spark | `iot-sensor-events-march-pipeline` |
-| `IOT_SPARK_MAX_OFFSETS_PER_TRIGGER` | Maximum source offsets per trigger | `100` |
-| `IOT_SPARK_EVENT_PERSISTENCE_MODE` | Event persistence mode | `postgres` or `silo` |
-| `IOT_SPARK_EVENT_SILO_RUN_ID` | Run ID for Strategy B | Required for event Silo persistence |
-| `IOT_SPARK_WINDOW_PERSISTENCE_MODE` | Window persistence mode | `postgres` or `silo_summaries` |
-| `IOT_SPARK_ROUTING_CHECKPOINT_DIR` | Routing query checkpoint | Dedicated path required for Strategy B |
-| `IOT_SPARK_WINDOW_CHECKPOINT_DIR` | Window query checkpoint | Separate dedicated path required for Strategy B |
+| `IOT_SPARK_MAX_OFFSETS_PER_TRIGGER` | Maximum source offsets processed per trigger | `100` |
+| `IOT_SPARK_EVENT_PERSISTENCE_MODE` | Event detail destination | `postgres` or `silo` |
+| `IOT_SPARK_EVENT_SILO_RUN_ID` | Run scope for Strategy B | Required for `silo` mode |
+| `IOT_SPARK_WINDOW_PERSISTENCE_MODE` | Window persistence strategy | `postgres` or `silo_summaries` |
+| `IOT_SPARK_ROUTING_CHECKPOINT_DIR` | Routing query checkpoint | Dedicated directory |
+| `IOT_SPARK_WINDOW_CHECKPOINT_DIR` | Window query checkpoint | Dedicated, separate directory |
 
-For Strategy B, use unique topics, run IDs, producer progress files, and separate routing/window checkpoints for independent runs.
+The consumer reads MinIO credentials from `.env.docker`. The PostgreSQL writer loads its connection settings from `.env`.
 
-The producer's default topic (`iot-sensor-events`) differs from the consumer's default topic. Always pass the same `--topic` explicitly to both components.
+For Strategy B, use fresh routing and window checkpoint directories. Relative checkpoint paths are resolved from the project root.
 
-The PostgreSQL writer reads its connection settings from `.env`, including `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD`. The consumer reads its MinIO credentials from `.env.docker`.
-
-**Never commit `.env`, `.env.docker`, passwords, access keys, or other secrets.**
-
-## 🚀 Running a Bounded Local Benchmark
-
-The following example demonstrates a controlled 10,000-event run. It does not process the entire source dataset.
-
-### 1. Verify the Environment
-
-Confirm that Kafka, PostgreSQL, and MinIO are available, the bucket exists, and the required Strategy B tables have been created.
-
-The SQL script `sql/streaming_summary_schema.sql` defines the Strategy B tables and indexes. Inspect the target database and apply the SQL using an authorized PostgreSQL client if necessary; the streaming consumer does not automatically execute the DDL.
-
-### 2. Configure an Isolated Run
-
-In PowerShell:
+Example PowerShell configuration for a new isolated run:
 
 ```powershell
-$run = "replace-with-unique-run-token"
+$run = 'replace-with-a-unique-run-id'
 $topic = "iot-sensor-events-bench-10k-$run"
 
 $env:IOT_KAFKA_TOPIC = $topic
-$env:IOT_SPARK_EVENT_PERSISTENCE_MODE = "silo"
+$env:IOT_SPARK_EVENT_PERSISTENCE_MODE = 'silo'
 $env:IOT_SPARK_EVENT_SILO_RUN_ID = $run
-$env:IOT_SPARK_WINDOW_PERSISTENCE_MODE = "silo_summaries"
-$env:IOT_SPARK_MAX_OFFSETS_PER_TRIGGER = "100"
+$env:IOT_SPARK_WINDOW_PERSISTENCE_MODE = 'silo_summaries'
+$env:IOT_SPARK_MAX_OFFSETS_PER_TRIGGER = '100'
 
 $env:IOT_SPARK_ROUTING_CHECKPOINT_DIR = "data/interim/checkpoints/$run-routing"
 $env:IOT_SPARK_WINDOW_CHECKPOINT_DIR = "data/interim/checkpoints/$run-windows"
 ```
 
-Verify that the topic, run ID, output prefixes, progress file, and both checkpoint directories are unused.
+Replace the sample run ID with a unique value and verify that the topic and all paths are unused before starting a new run.
 
-### 3. Start the Spark Consumer
-
-```powershell
-.\.venv\Scripts\python.exe -m src.streaming.kafka_spark_consumer
-```
-
-Wait until both the routing query and window-metrics query have started successfully.
-
-### 4. Publish a Bounded Sample
-
-Open a second PowerShell terminal and set the same `$run` and `$topic` values. Then execute:
-
-```powershell
-.\.venv\Scripts\python.exe -m src.ingestion.kafka_producer `
-    --input ".\data\raw\2026-03_bme280\2026-03_bme280.csv" `
-    --topic $topic `
-    --chunk-size 1000 `
-    --max-messages 10000 `
-    --progress-file ".\data\interim\checkpoints\kafka_producer_$run.json"
-```
-
-Confirm that the example CSV path exists before running it.
-
-The `--max-messages` option bounds the number of successfully built and sent events during that producer invocation. Invalid or out-of-period rows can be read and skipped, so a message limit is not a strict source-row limit.
-
-### 5. Validate and Stop
-
-After the producer finishes, allow Spark to process remaining Kafka offsets. Validate Parquet archives, PostgreSQL summaries, window statuses, anomaly records, and sink progress before stopping the run.
-
-For larger replays, increase the bounded target only after reviewing the results and resource usage of the preceding run. The full 87.3-million-row dataset is outside the current validation scope.
-
-### Resuming an Interrupted Run
-
-To resume the same interrupted run, retain the original topic, run ID, producer progress file, and both Spark checkpoints. Do not create new checkpoints for a run that must resume from its previous processing state, and do not assume that blindly rerunning the producer will preserve the intended total.
-
-## 🧪 Testing and Validation
-
-Run the unit tests from the repository root:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests/unit -q
-```
-
-The tests cover producer parsing and progress tracking, event schema handling, JSON payload parsing, configuration validation, local Spark transformations, and PostgreSQL writer behavior.
-
-The unit suite is not a full end-to-end integration test of Kafka, Spark, MinIO, and PostgreSQL. Passing unit tests does not establish production readiness.
-
-A previous local validation report recorded **90 unit tests passing** on October 14, 2026. This is a reported historical result; this README update did not execute the tests.
-
-## 📊 Controlled Benchmark Results
-
-The following results are from local subset benchmarks. The complete dataset of approximately 87.3 million rows was not processed.
-
-| Benchmark | Events Archived in MinIO | Accepted | `review_required` | Distinct Event Batches |
-|---|---:|---:|---:|---:|
-| 10K | 10,000 | 9,303 | 697 | 100 |
-| 100K | 100,000 | 92,650 | 7,350 | 200 |
-| 250K | 250,000 | 231,547 | 18,453 | 1,000 |
-
-For the 250K benchmark, PostgreSQL Strategy B progress records reached batch ID `1000` for both `event_summaries` and `window_summaries`.
-
-### Interpreting These Results
-
-- The benchmark counts refer to controlled local runs, not full-dataset processing.
-- The 250K event total and statuses were verified by reading the resulting Parquet archive in MinIO.
-- PostgreSQL stores compact summaries and anomaly details in Strategy B rather than 250,000 detailed event rows.
-- The 250K run experienced a Spark interruption and was resumed using its existing checkpoints; the final archive count and PostgreSQL progress markers were verified afterwards.
-- These runs do not establish guaranteed throughput, latency, capacity, or production-scale stability.
-
-## 📸 Grafana Screenshots
-
-The `dashboards/` directory contains screenshots of selected Grafana panels. These images document the intended visualizations; they are not importable dashboard definitions.
-
-<details>
-  <summary><strong>Accepted Events</strong></summary>
-
-  ![Accepted Events](dashboards/accepted-events.png)
-</details>
-
-<details>
-  <summary><strong>Hourly Event Volume</strong></summary>
-
-  ![Hourly Event Volume](dashboards/hourly-event-volume.png)
-</details>
-
-<details>
-  <summary><strong>Data Quality</strong></summary>
-
-  ![Data Quality](dashboards/data-quality.png)
-</details>
-
-<details>
-  <summary><strong>Window Status Distribution</strong></summary>
-
-  ![Window Status Distribution](dashboards/window-status-distribution.png)
-</details>
-
-<details>
-  <summary><strong>Suspected Anomalies</strong></summary>
-
-  ![Suspected Anomalies](dashboards/suspected-anomalies.png)
-</details>
-
-<details>
-  <summary><strong>Average Temperature</strong></summary>
-
-  ![Average Temperature](dashboards/hourly-average-temperature.png)
-</details>
-
-<details>
-  <summary><strong>Average Humidity</strong></summary>
-
-  ![Average Humidity](dashboards/hourly-average-humidity.png)
-</details>
-
-<details>
-  <summary><strong>Average Pressure</strong></summary>
-
-  ![Average Pressure](dashboards/hourly-average-pressure.png)
-</details>
-
-<details>
-  <summary><strong>Top Active Sensors</strong></summary>
-
-  ![Top Active Sensors](dashboards/top-active-sensors.png)
-</details>
-
-<details>
-  <summary><strong>Sensor Geographic Map</strong></summary>
-
-  ![Sensor Geographic Map](dashboards/sensor-geographic-map.png)
-</details>
-
-Dashboard screenshots should only be presented as verified benchmark outputs when their query configuration, time range, topic, run ID, and displayed values have been checked.
-
-## ⚠️ Limitations and Future Improvements
-
-- The full dataset containing approximately 87.3 million rows has not been processed.
-- Local subset benchmarks do not prove full-scale capacity, production readiness, or guaranteed performance.
-- Spark stability warnings were observed in earlier runs; their definitive root cause has not been established.
-- MinIO and PostgreSQL do not share a distributed transaction. Partial Parquet output may be visible after a failed write.
-- Strategy B stores detailed events and window metrics in MinIO while PostgreSQL stores compact analytical outputs.
-- The repository does not include a complete dependency lock file or automated provisioning for all external connectors.
-- Grafana dashboard JSON definitions and dashboard provisioning are not included.
-- The producer emits event schema version 1.1, while `docs/event_schema.md` still labels the contract as version 1.0.
-- Legacy PostgreSQL tables include PostGIS geometry columns, but Strategy B currently uses numeric coordinates and does not implement a dedicated spatial-processing stage.
-- Cloud deployment has not been implemented.
-
-Potential future improvements include dependency management, updated schema documentation, more comprehensive integration testing, Spark stability diagnostics, importable Grafana dashboards, dedicated spatial analytics, and cloud deployment.
+The producer's default topic is `iot-sensor-events`, which differs from the consumer's default. Pass the same topic explicitly to both components.
 
 ---
 
-<p align="center">
-  <strong>Built to explore practical real-time data engineering with Kafka, Spark, MinIO, PostgreSQL, and Grafana.</strong>
-</p>
+## Running a Controlled Benchmark
 
-<p align="center">
-  <sub>Local implementation • Controlled subset benchmarks • Full-dataset processing not performed</sub>
-</p>
+**Do not replay the full 87.3-million-row dataset.** The following workflow is intended for a bounded local run.
+
+### 1. Prepare the Services
+
+Ensure that Kafka, PostgreSQL, and MinIO are running. Confirm that the selected Kafka topic, run ID, checkpoint directories, producer progress file, and output prefixes do not already belong to another run.
+
+Verify the target database schema and the `iot-data-lake` bucket before starting the consumer.
+
+### 2. Start the Spark Consumer
+
+In a dedicated PowerShell terminal, configure the environment variables for your new run and execute:
+
+```powershell
+python -m src.streaming.kafka_spark_consumer
+```
+
+Both Spark queries should use their own checkpoint directory.
+
+### 3. Publish a Bounded Dataset Subset
+
+In a second PowerShell terminal, set the same `$run` and `$topic` values and run:
+
+```powershell
+python -m src.ingestion.kafka_producer `
+  --input .\data\raw\2026-03_bme280\2026-03_bme280.csv `
+  --topic $topic `
+  --chunk-size 1000 `
+  --max-messages 10000 `
+  --progress-file ".\data\interim\checkpoints\kafka_producer_$run.json"
+```
+
+This example limits the invocation to 10,000 events successfully built and sent. Invalid or out-of-period CSV rows may be skipped before the message limit is reached, so the number of source rows inspected may be greater than 10,000.
+
+If the run is interrupted, check confirmed Kafka sends and the existing progress before resuming. The limit is per invocation; repeating the producer command does not automatically guarantee a total of exactly 10,000 events.
+
+### 4. Validate the Outputs
+
+After the producer completes:
+
+- Verify archived event counts in Silo/MinIO.
+- Compare accepted and `review_required` counts with the benchmark output.
+- Check PostgreSQL summary totals and sink progress.
+- Inspect window outputs while allowing for event-time watermark finalization.
+- Stop the isolated run only after both Spark queries and their outputs have been checked.
+
+For a larger benchmark, use a new isolated topic/run/checkpoint set and change the message limit deliberately. Never reuse a historical benchmark's artifacts.
+
+---
+
+## Testing
+
+Run the unit test suite from the project root:
+
+```powershell
+python -m unittest discover -s tests/unit -v
+```
+
+The unit suite covers producer parsing and checkpoint behavior, consumer configuration, local Spark transformations, window logic, and mocked PostgreSQL writer behavior.
+
+The Spark-related unit tests can start a local Spark session and write temporary local Parquet data.
+
+**Unit tests are not an end-to-end validation** of Kafka ingestion, PostgreSQL persistence, Silo/MinIO storage, or Grafana integration. No claim of a complete end-to-end test is made here.
+
+---
+
+## Benchmark Results
+
+The following results correspond to completed, controlled local subset runs. They do not represent processing of the entire dataset.
+
+| Benchmark | Events archived in Silo | Accepted | `review_required` | Distinct event batches |
+|---|---:|---:|---:|---:|
+| 10,000 events | 10,000 | 9,303 | 697 | 100 |
+| 100,000 events | 100,000 | 92,650 | 7,350 | 200 |
+| 250,000 events | 250,000 | 231,547 | 18,453 | 1,000 |
+
+### Verified 250,000-Event Run
+
+For the completed 250,000-event Strategy B benchmark:
+
+- **250,000** classified event records were verified in Silo/MinIO.
+- **231,547** events were classified as accepted.
+- **18,453** events were classified as `review_required`.
+- The archive contained **1,000 distinct event batches**.
+- PostgreSQL event-summary and window-summary progress records both reached batch ID **1,000**.
+- PostgreSQL hourly and daily accepted-event summary totals matched **231,547**.
+
+The recorded window-status summaries contained 272 normal windows, one suspected window, and one insufficient-data window. The anomaly table contained one suspected-anomaly record.
+
+These figures describe the observed local benchmark outputs. They are not evidence of full-scale capacity, guaranteed runtime, production readiness, or end-to-end exactly-once delivery.
+
+A previous 100,000-event run also produced Spark stability warnings and heartbeat/Py4J errors. The root cause has not been established, so further reliability testing would be needed before making performance or production claims.
+
+---
+
+## Grafana Dashboards
+
+Grafana panels are configured manually and use PostgreSQL analytical summaries where applicable.
+
+The repository contains PNG screenshots documenting the visualizations. These images are **not importable dashboard definitions**, and no Grafana provisioning configuration is included.
+
+### Accepted Events
+
+![Accepted events panel](dashboards/accepted-events.png)
+
+### Data Quality
+
+![Data quality panel](dashboards/data-quality.png)
+
+### Hourly Event Volume
+
+![Hourly event volume panel](dashboards/hourly-event-volume.png)
+
+### Average Temperature
+
+![Average temperature panel](dashboards/hourly-average-temperature.png)
+
+### Average Humidity
+
+![Average humidity panel](dashboards/hourly-average-humidity.png)
+
+### Average Pressure
+
+![Average pressure panel](dashboards/hourly-average-pressure.png)
+
+### Window Status Distribution
+
+![Window status distribution panel](dashboards/window-status-distribution.png)
+
+### Suspected Anomalies
+
+![Suspected anomalies panel](dashboards/suspected-anomalies.png)
+
+### Top Active Sensors
+
+![Top active sensors panel](dashboards/top-active-sensors.png)
+
+### Sensor Geographic Map
+
+![Sensor geographic map panel](dashboards/sensor-geographic-map.png)
+
+---
+
+## Limitations and Future Improvements
+
+- The complete original dataset of 87,298,799 rows has not been processed; all reported benchmarks use bounded subsets.
+- Local benchmarks do not establish full-scale throughput, latency, recovery behavior, or production readiness.
+- A previous 100,000-event run had Spark stability warnings that still require diagnosis.
+- Silo/MinIO and PostgreSQL do not participate in a shared distributed transaction.
+- Python dependencies and external connector versions are not fully pinned in a dependency manifest.
+- Grafana dashboard JSON definitions and automated provisioning are not included.
+- The event-schema documentation should be kept aligned with the producer's current schema version 1.1.
+- Cloud deployment and production orchestration are possible future extensions; they are not implemented in the current project.
+
+---
+
+## Project Status
+
+The project demonstrates a bounded local IoT data engineering pipeline using Kafka, Spark Structured Streaming, Silo/MinIO, PostgreSQL, and Grafana.
+
+The 250,000-event benchmark provides verified evidence of event archiving and Strategy B summary progress for that run. Larger-scale reliability, automated dashboard provisioning, dependency reproducibility, and cloud deployment remain outside the current validated scope.
+
+**Core pipeline:** CSV → Python Producer → Kafka → Spark Structured Streaming → Silo/MinIO + PostgreSQL → Grafana
