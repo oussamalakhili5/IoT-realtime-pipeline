@@ -7,8 +7,6 @@ import math
 from numbers import Real
 from typing import Any
 
-import pandas as pd
-
 
 SCHEMA_VERSION = "1.1"
 
@@ -19,8 +17,8 @@ def _is_missing(value: Any) -> bool:
         return True
 
     try:
-        return bool(pd.isna(value))
-    except (TypeError, ValueError):
+        return math.isnan(value)
+    except (TypeError, ValueError, OverflowError):
         return False
 
 
